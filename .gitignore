@@ -1,0 +1,42 @@
+# Flutter/Dart/Pub related
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+pubspec.lock
+.flutter-plugins
+.idea/
+.vscode/
+.DS_Store
+
+# Build related
+build/
+ios/Flutter/Flutter.framework.zip
+
+# Web related
+web/.dart_tool/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+.metadata
+.project
+.classpath
+
+# VSCode related
+.vscode/
+
+# MacOS related
+.DS_Store
+.localized
+
+# Windows related
+Thumbs.db
+
+# Linux related
+*.lock
+
+# Firebase related
+.firebase/

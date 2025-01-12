@@ -1,0 +1,53 @@
+
+// Function to load the GeoJSON map
+Future<Widget> loadGeoJson(String assetPath) async {
+  try {
+    // Load the GeoJSON file from the asset as a String using rootBundle
+    String geoJsonData = await rootBundle.loadString(assetPath);
+
+    // Parse the GeoJSON data into a Map
+    final Map<String, dynamic> geoJsonMap = json.decode(geoJsonData);
+
+    // Log parsed data to verify
+    logger.i('Parsed GeoJSON Data: $geoJsonMap');
+
+    // Create the GeoJSON layer
+    final geoJsonLayer = GeoJSONLayerOptions(
+      geoJson: geoJsonMap,
+      polygonOptions: PolygonOptions(
+        color: Colors.blueAccent.withOpacity(0.3),
+        borderColor: Colors.blueAccent,
+        borderStrokeWidth: 1.0,
+      ),
+      polylineOptions: PolylineOptions(
+        color: Colors.redAccent,
+        strokeWidth: 2.0,
+      ),
+      markerOptions: MarkerOptions(
+        // Define marker options if your GeoJSON has point features
+      ),
+    );
+
+    // Create FlutterMap widget
+    return FlutterMap(
+      options: MapOptions(
+        center: LatLng(0, 0), // Adjust as needed
+        zoom: 2.0,
+        interactiveFlags: InteractiveFlag.all,
+      ),
+      layers: [
+        TileLayerOptions(
+          urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+          subdomains: ['a', 'b', 'c'],
+          attributionBuilder: (_) {
+            return Text("© OpenStreetMap contributors");
+          },
+        ),
+        geoJsonLayer,
+      ],
+    );
+  } catch (e, stackTrace) {
+    logger.e('Failed to load GeoJSON map', error: e, stackTrace: stackTrace);
+    rethrow;
+  }
+}
