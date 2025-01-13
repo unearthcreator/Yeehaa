@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // for rootBundle
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
@@ -37,7 +38,7 @@ class EarthMapPageState extends State<EarthMapPage> {
   bool _isMapReady = false;
 
   // ---------------------- Timeline / Canvas UI ----------------------
-  List<String> _hiveUuidsForTimeline = [];
+  final List<String> _hiveUuidsForTimeline = [];
   bool _showTimelineCanvas = false;
 
   // ---------------------- Annotation Menu Variables ----------------------
@@ -46,16 +47,19 @@ class EarthMapPageState extends State<EarthMapPage> {
   Offset _annotationMenuOffset = Offset.zero;
 
   // ---------------------- Dragging & Connect Mode ----------------------
-  bool _isDragging = false;   // We'll reuse this for "move mode"
+  bool _isDragging = false; // Reused for "move" mode
   bool _isConnectMode = false;  
   String get _annotationButtonText => _isDragging ? 'Lock' : 'Move';
 
   // ---------------------- UUID Generator ----------------------
   final uuid = Uuid();
 
-  // Domain logic for edit, connect, move, etc.
+  // ---------------------- Domain Logic (Actions) ----------------------
   late AnnotationActions _annotationActions;
 
+  // ---------------------------------------------------------------------
+  //                            LIFECYCLE
+  // ---------------------------------------------------------------------
   @override
   void initState() {
     super.initState();
@@ -75,7 +79,7 @@ class EarthMapPageState extends State<EarthMapPage> {
       logger.i('Starting map initialization');
       _mapboxMap = mapboxMap;
 
-      // Create the underlying Mapbox annotation manager
+      // 1) Create the underlying Mapbox annotation manager
       final annotationManager = await mapboxMap.annotations
           .createPointAnnotationManager()
           .onError((error, stackTrace) {
@@ -83,18 +87,18 @@ class EarthMapPageState extends State<EarthMapPage> {
         throw Exception('Failed to initialize map annotations');
       });
 
-      // Local repo + annotation linker
+      // 2) Local repo + annotation linker
       _localRepo = LocalAnnotationsRepository();
       final annotationIdLinker = AnnotationIdLinker();
 
-      // MapAnnotationsManager
+      // 3) Create our MapAnnotationsManager
       _annotationsManager = MapAnnotationsManager(
         annotationManager,
         annotationIdLinker: annotationIdLinker,
         localAnnotationsRepository: _localRepo,
       );
 
-      // MapGestureHandler
+      // 4) Set up the gesture handler
       _gestureHandler = MapGestureHandler(
         mapboxMap: _mapboxMap,
         annotationsManager: _annotationsManager,
@@ -112,7 +116,7 @@ class EarthMapPageState extends State<EarthMapPage> {
         },
       );
 
-      // AnnotationActions
+      // 5) Domain logic for editing, connecting, etc.
       _annotationActions = AnnotationActions(
         localRepo: _localRepo,
         annotationsManager: _annotationsManager,
@@ -121,11 +125,12 @@ class EarthMapPageState extends State<EarthMapPage> {
 
       logger.i('Map initialization completed successfully');
 
+      // 6) Once the map is ready, load Hive annotations
       if (mounted) {
         setState(() => _isMapReady = true);
-        // Load Hive annotations
         await _annotationsManager.loadAnnotationsFromHive();
       }
+
     } catch (e, stackTrace) {
       logger.e('Error during map initialization', error: e, stackTrace: stackTrace);
       if (mounted) {
@@ -208,7 +213,7 @@ class EarthMapPageState extends State<EarthMapPage> {
         }
         _isDragging = true;
       } else {
-        _annotationActions.cancelMoveAnnotation(); 
+        _annotationActions.cancelMoveAnnotation();
         _isDragging = false;
       }
       _showAnnotationMenu = false;
@@ -276,16 +281,20 @@ class EarthMapPageState extends State<EarthMapPage> {
     );
   }
 
+  // ---------------------------------------------------------------------
+  //                           BUILD METHOD
+  // ---------------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Stack(
         children: [
-          // The main map
+          // -------------------- Main Map --------------------
           _buildMapWidget(),
 
+          // Only show the rest if the map is ready
           if (_isMapReady) ...[
-            // TIMELINE
+            // -------------------- Timeline --------------------
             buildTimelineButton(
               isMapReady: _isMapReady,
               context: context,
@@ -298,15 +307,18 @@ class EarthMapPageState extends State<EarthMapPage> {
               },
               onHiveIdsFetched: (List<String> hiveIds) {
                 setState(() {
-                  _hiveUuidsForTimeline = hiveIds;
+                  _hiveUuidsForTimeline.clear();
+                  _hiveUuidsForTimeline.addAll(hiveIds);
                 });
               },
             ),
+
+            // Debug utility buttons
             buildClearAnnotationsButton(annotationsManager: _annotationsManager),
             buildClearImagesButton(),
             buildDeleteImagesFolderButton(),
 
-            // SEARCH
+            // -------------------- Search Widget --------------------
             EarthMapSearchWidget(
               mapboxMap: _mapboxMap,
               annotationsManager: _annotationsManager,
@@ -315,7 +327,7 @@ class EarthMapPageState extends State<EarthMapPage> {
               uuid: uuid,
             ),
 
-            // The annotation menu
+            // -------------------- Annotation Menu --------------------
             AnnotationMenu(
               show: _showAnnotationMenu,
               annotation: _annotationMenuAnnotation,
@@ -328,7 +340,7 @@ class EarthMapPageState extends State<EarthMapPage> {
               onCancel: _handleCancelButton,
             ),
 
-            // CONNECT BANNER
+            // -------------------- Connect Banner --------------------
             _annotationActions.buildConnectModeBanner(
               isConnectMode: _isConnectMode,
               onCancel: () {
@@ -338,13 +350,13 @@ class EarthMapPageState extends State<EarthMapPage> {
               mapboxMap: _mapboxMap,
             ),
 
-            // The new "Move" overlay for dragging
+            // -------------------- "Move" Overlay --------------------
             _annotationActions.buildMoveOverlay(
               isMoveMode: _isDragging,
               mapboxMap: _mapboxMap,
             ),
 
-            // TIMELINE
+            // -------------------- Timeline Canvas --------------------
             buildTimelineCanvas(
               showTimelineCanvas: _showTimelineCanvas,
               hiveUuids: _hiveUuidsForTimeline,
