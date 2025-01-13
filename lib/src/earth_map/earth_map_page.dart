@@ -18,6 +18,7 @@ import 'package:map_mvp_project/models/world_config.dart';
 import 'package:map_mvp_project/src/earth_map/search/search_widget.dart';
 import 'package:map_mvp_project/src/earth_map/misc/test_utils.dart';
 import 'package:map_mvp_project/src/earth_map/utils/connect_banner.dart';
+import 'package:map_mvp_project/src/earth_map/annotations/annotation_menu.dart';
 
 /// The main EarthMapPage, which sets up the map, annotations, and various UI widgets.
 class EarthMapPage extends StatefulWidget {
@@ -206,47 +207,41 @@ class EarthMapPageState extends State<EarthMapPage> {
   Future<void> _editAnnotation() async {
     logger.i('_editAnnotation called');
 
-    // 1. Log which map annotation we're trying to edit
     if (_annotationMenuAnnotation == null) {
       logger.w('No _annotationMenuAnnotation is set. Aborting edit.');
       return;
     }
     logger.i('Attempting to edit annotation with map ID: ${_annotationMenuAnnotation!.id}');
 
-    // 2. Retrieve the hiveId from the linker
+    // Retrieve the hiveId
     final hiveId = _gestureHandler.annotationIdLinker
         .getHiveIdForMapId(_annotationMenuAnnotation!.id);
     logger.i('Hive ID from annotationIdLinker: $hiveId');
 
-    // 3. If we have no hiveId, log a warning and return
     if (hiveId == null) {
       logger.w('No hive ID found for this annotation.');
       return;
     }
 
-    // 4. Retrieve all annotations from Hive and log their count
     final allHiveAnnotations = await _localRepo.getAnnotations();
     logger.i('Total annotations retrieved from Hive: ${allHiveAnnotations.length}');
 
-    // 5. Attempt to find the matching annotation
     final ann = allHiveAnnotations.firstWhere(
       (a) => a.id == hiveId,
       orElse: () {
-        logger.w('Annotation with hiveId: $hiveId not found in the list. Returning a placeholder annotation.');
+        logger.w('Annotation with hiveId: $hiveId not found in the list.');
         return Annotation(id: 'notFound');
       },
     );
 
-    // 6. If not found, log it
     if (ann.id == 'notFound') {
       logger.w('Annotation not found in Hive.');
       return;
     } else {
-      // Otherwise, log the found annotation
       logger.i('Found annotation in Hive: $ann');
     }
 
-    // --- Rest of your existing code ---
+    // Show form dialog
     final title = ann.title ?? '';
     final startDate = ann.startDate ?? '';
     final note = ann.note ?? '';
@@ -285,8 +280,8 @@ class EarthMapPageState extends State<EarthMapPage> {
       await _localRepo.updateAnnotation(updatedAnnotation);
       logger.i('Annotation updated in Hive with id: ${ann.id}');
 
+      // Remove old and add updated visually
       await _annotationsManager.removeAnnotation(_annotationMenuAnnotation!);
-
       final iconBytes = await rootBundle.load('assets/icons/${updatedAnnotation.iconName ?? 'cross'}.png');
       final imageData = iconBytes.buffer.asUint8List();
 
@@ -297,7 +292,7 @@ class EarthMapPageState extends State<EarthMapPage> {
         date: updatedAnnotation.startDate ?? '',
       );
 
-      // Re-link the updated annotation
+      // Re-link
       _gestureHandler.annotationIdLinker.registerAnnotationId(
         mapAnnotation.id,
         updatedAnnotation.id,
@@ -311,6 +306,53 @@ class EarthMapPageState extends State<EarthMapPage> {
     } else {
       logger.i('User cancelled edit.');
     }
+  }
+
+  // ---------------------------------------------------------------------
+  //                         MENU BUTTON CALLBACKS
+  // ---------------------------------------------------------------------
+  void _handleMoveOrLockButton() {
+    setState(() {
+      if (_isDragging) {
+        _gestureHandler.hideTrashCanAndStopDragging();
+        _isDragging = false;
+      } else {
+        _gestureHandler.startDraggingSelectedAnnotation();
+        _isDragging = true;
+      }
+    });
+  }
+
+  Future<void> _handleEditButton() async {
+    await _editAnnotation();
+  }
+
+  void _handleConnectButton() {
+    logger.i('Connect button clicked');
+    setState(() {
+      _showAnnotationMenu = false;
+      if (_isDragging) {
+        _gestureHandler.hideTrashCanAndStopDragging();
+        _isDragging = false;
+      }
+      _isConnectMode = true;
+    });
+    if (_annotationMenuAnnotation != null) {
+      _gestureHandler.enableConnectMode(_annotationMenuAnnotation!);
+    } else {
+      logger.w('No annotation available when Connect pressed');
+    }
+  }
+
+  void _handleCancelButton() {
+    setState(() {
+      _showAnnotationMenu = false;
+      _annotationMenuAnnotation = null;
+      if (_isDragging) {
+        _gestureHandler.hideTrashCanAndStopDragging();
+        _isDragging = false;
+      }
+    });
   }
 
   // ---------------------------------------------------------------------
@@ -335,99 +377,9 @@ class EarthMapPageState extends State<EarthMapPage> {
     );
   }
 
-  /// The floating annotation menu (long-press on annotation)
-  Widget _buildAnnotationMenu() {
-    if (!_showAnnotationMenu || _annotationMenuAnnotation == null) return const SizedBox.shrink();
-
-    return Positioned(
-      left: _annotationMenuOffset.dx,
-      top: _annotationMenuOffset.dy,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Move/Lock button
-          ElevatedButton(
-            onPressed: () {
-              setState(() {
-                if (_isDragging) {
-                  _gestureHandler.hideTrashCanAndStopDragging();
-                  _isDragging = false;
-                } else {
-                  _gestureHandler.startDraggingSelectedAnnotation();
-                  _isDragging = true;
-                }
-              });
-            },
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            child: Text(_annotationButtonText),
-          ),
-          const SizedBox(height: 8),
-
-          // Edit button
-          ElevatedButton(
-            onPressed: () async {
-              await _editAnnotation();
-            },
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            child: const Text('Edit'),
-          ),
-          const SizedBox(height: 8),
-
-          // Connect button
-          ElevatedButton(
-            onPressed: () {
-              logger.i('Connect button clicked');
-              setState(() {
-                _showAnnotationMenu = false;
-                if (_isDragging) {
-                  _gestureHandler.hideTrashCanAndStopDragging();
-                  _isDragging = false;
-                }
-                _isConnectMode = true;
-              });
-              if (_annotationMenuAnnotation != null) {
-                _gestureHandler.enableConnectMode(_annotationMenuAnnotation!);
-              } else {
-                logger.w('No annotation available when Connect pressed');
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            child: const Text('Connect'),
-          ),
-          const SizedBox(height: 8),
-
-          // Cancel button
-          ElevatedButton(
-            onPressed: () {
-              setState(() {
-                _showAnnotationMenu = false;
-                _annotationMenuAnnotation = null;
-                if (_isDragging) {
-                  _gestureHandler.hideTrashCanAndStopDragging();
-                  _isDragging = false;
-                }
-              });
-            },
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
-    );
-  }
-
+  // ---------------------------------------------------------------------
+  //                            BUILD METHOD
+  // ---------------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -436,7 +388,7 @@ class EarthMapPageState extends State<EarthMapPage> {
           // The main map widget
           _buildMapWidget(),
 
-          // Only show the rest if the map is ready
+          // Only show these overlays if the map is ready
           if (_isMapReady) ...[
             // TIMELINE BUTTON
             buildTimelineButton(
@@ -444,13 +396,11 @@ class EarthMapPageState extends State<EarthMapPage> {
               context: context,
               mapboxMap: _mapboxMap,
               annotationsManager: _annotationsManager,
-              // This toggles the boolean that shows/hides the timeline
               onToggleTimeline: () {
                 setState(() {
                   _showTimelineCanvas = !_showTimelineCanvas;
                 });
               },
-              // This receives the Hive IDs after querying visible features
               onHiveIdsFetched: (List<String> hiveIds) {
                 setState(() {
                   _hiveUuidsForTimeline = hiveIds;
@@ -472,8 +422,18 @@ class EarthMapPageState extends State<EarthMapPage> {
               uuid: uuid,
             ),
 
-            // ANNOTATION MENU
-            _buildAnnotationMenu(),
+            // ANNOTATION MENU (new widget)
+            AnnotationMenu(
+              show: _showAnnotationMenu,
+              annotation: _annotationMenuAnnotation,
+              offset: _annotationMenuOffset,
+              isDragging: _isDragging,
+              annotationButtonText: _annotationButtonText,
+              onMoveOrLock: _handleMoveOrLockButton,
+              onEdit: _handleEditButton,
+              onConnect: _handleConnectButton,
+              onCancel: _handleCancelButton,
+            ),
 
             // CONNECT MODE BANNER
             buildConnectModeBanner(
