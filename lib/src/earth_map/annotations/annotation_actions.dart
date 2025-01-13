@@ -17,10 +17,17 @@ class AnnotationActions {
   final AnnotationIdLinker annotationIdLinker;
 
   // ---------------------------------------------------------------
-  //         STATE FOR "CONNECT MODE" (first vs second annotation)
+  //         STATE FOR "CONNECT MODE"
   // ---------------------------------------------------------------
   bool _isInConnectMode = false;
   PointAnnotation? _firstConnectAnnotation;
+
+  // ---------------------------------------------------------------
+  //         STATE FOR "MOVE MODE"
+  // ---------------------------------------------------------------
+  bool _isInMoveMode = false;
+  PointAnnotation? _movingAnnotation;
+  Point? _movingAnnotationOriginalPoint;
 
   AnnotationActions({
     required this.localRepo,
@@ -43,22 +50,14 @@ class AnnotationActions {
     _firstConnectAnnotation = null;
   }
 
-  /// Call this when the user taps the second annotation
-  /// while we're in connect mode. This is where you'd do
-  /// your "linking" or "drawing lines" or "storing connection" logic.
   Future<void> finishConnectMode(PointAnnotation secondAnnotation) async {
     if (!_isInConnectMode || _firstConnectAnnotation == null) {
-      logger.w('finishConnectMode called but we are not actually in connect mode or have no first annotation.');
+      logger.w('finishConnectMode called but we are not in connect mode or missing the first annotation.');
       return;
     }
     logger.i('AnnotationActions: finishConnectMode connecting ${_firstConnectAnnotation!.id} with ${secondAnnotation.id}.');
 
-    // Example: If "connecting" means you store a line in Hive or do something else,
-    // place that logic here. For now, just log it.
-    // e.g.:
-    // await localRepo.addConnection(_firstConnectAnnotation!.id, secondAnnotation.id);
-
-    // Once done, clear the state
+    // Do your linking/drawing lines in Hive or similar here
     _isInConnectMode = false;
     _firstConnectAnnotation = null;
 
@@ -66,7 +65,118 @@ class AnnotationActions {
   }
 
   // ---------------------------------------------------------------
-  //           Existing Edit Logic (unchanged)
+  //                  MOVE (Drag) Methods
+  // ---------------------------------------------------------------
+  void startMoveAnnotation(PointAnnotation annotation) {
+    logger.i('AnnotationActions: startMoveAnnotation for ${annotation.id}');
+    _isInMoveMode = true;
+    _movingAnnotation = annotation;
+    _movingAnnotationOriginalPoint = annotation.geometry;
+  }
+
+  /// Cancels the move, returning the annotation to the original spot
+  Future<void> cancelMoveAnnotation() async {
+    if (!_isInMoveMode || _movingAnnotation == null) {
+      logger.w('cancelMoveAnnotation called but not in move mode or no annotation selected.');
+      return;
+    }
+    logger.i('AnnotationActions: cancelMoveAnnotation for ${_movingAnnotation!.id}');
+
+    if (_movingAnnotationOriginalPoint != null) {
+      // revert the position visually
+      await annotationsManager.updateVisualPosition(_movingAnnotation!, _movingAnnotationOriginalPoint!);
+    }
+
+    _isInMoveMode = false;
+    _movingAnnotation = null;
+    _movingAnnotationOriginalPoint = null;
+  }
+
+  /// Finalize the new location in Hive, then exit move mode
+  Future<void> finishMoveAnnotation(Point newLocation) async {
+    if (!_isInMoveMode || _movingAnnotation == null) {
+      logger.w('finishMoveAnnotation called but not in move mode or annotation was null.');
+      return;
+    }
+    final movedAnnotation = _movingAnnotation!;
+    logger.i('AnnotationActions: finishMoveAnnotation for ${movedAnnotation.id} to $newLocation');
+
+    // 1. Update annotation in Hive
+    final hiveId = annotationIdLinker.getHiveIdForMapId(movedAnnotation.id);
+    if (hiveId == null) {
+      logger.w('No hive ID found for the moving annotation. Cannot update Hive.');
+    } else {
+      final allAnnotations = await localRepo.getAnnotations();
+      final ann = allAnnotations.firstWhere(
+        (a) => a.id == hiveId,
+        orElse: () => Annotation(id: 'notFound'),
+      );
+
+      if (ann.id == 'notFound') {
+        logger.w('Moving annotation not found in Hive, cannot update.');
+      } else {
+        logger.i('finishMoveAnnotation: found in Hive => $ann');
+        // Build updated version
+        final updated = Annotation(
+          id: ann.id,
+          title: ann.title,
+          iconName: ann.iconName,
+          startDate: ann.startDate,
+          endDate: ann.endDate,
+          note: ann.note,
+          // Cast num? to double
+          latitude: (newLocation.coordinates[1] as num).toDouble(),
+          longitude: (newLocation.coordinates[0] as num).toDouble(),
+          imagePath: ann.imagePath,
+        );
+        // Save to Hive
+        await localRepo.updateAnnotation(updated);
+        logger.i('finishMoveAnnotation: updated lat/lng in Hive => $updated');
+      }
+    }
+
+    // 2. Clear "move mode"
+    _isInMoveMode = false;
+    _movingAnnotation = null;
+    _movingAnnotationOriginalPoint = null;
+  }
+
+  /// Returns a widget that draws a transparent overlay + draggable circle
+  /// for the user to move the annotation around on the map.
+    Widget buildMoveOverlay({
+    required bool isMoveMode,
+    required MapboxMap mapboxMap,
+  }) {
+    // 1. If move mode is off or no annotation to move, do nothing
+    if (!isMoveMode || _movingAnnotation == null || _movingAnnotation!.geometry == null) {
+      return const SizedBox.shrink();
+    }
+
+    // 2. If geometry is also non-null:
+    final initialPoint = _movingAnnotation!.geometry;
+    if (initialPoint == null) {
+      return const SizedBox.shrink(); 
+    }
+
+    return _DraggableAnnotationOverlay(
+      initialPosition: initialPoint,
+      mapboxMap: mapboxMap,
+      onDragUpdate: (Point newPoint) async {
+        // Safely check if _movingAnnotation still valid:
+        if (_movingAnnotation != null) {
+          await annotationsManager.updateVisualPosition(_movingAnnotation!, newPoint);
+        }
+      },
+      onDragEnd: () {
+        if (_movingAnnotation != null) {
+          finishMoveAnnotation(_movingAnnotation!.geometry);
+        }
+      },
+    );
+  }
+
+  // ---------------------------------------------------------------
+  //                  Edit Annotation Logic
   // ---------------------------------------------------------------
   Future<void> editAnnotation({
     required BuildContext context,
@@ -79,25 +189,19 @@ class AnnotationActions {
 
     logger.i('Attempting to edit annotation with map ID: ${mapAnnotation.id}');
 
-    // 1. Get the Hive ID from the linker
     final hiveId = annotationIdLinker.getHiveIdForMapId(mapAnnotation.id);
-    logger.i('Hive ID from annotationIdLinker: $hiveId');
-
+    logger.i('Hive ID: $hiveId');
     if (hiveId == null) {
       logger.w('No hive ID found for this annotation.');
       return;
     }
 
-    // 2. Load from Hive
-    final allHiveAnnotations = await localRepo.getAnnotations();
-    logger.i('Total annotations retrieved from Hive: ${allHiveAnnotations.length}');
-
-    final ann = allHiveAnnotations.firstWhere(
+    // Load from Hive
+    final allAnnotations = await localRepo.getAnnotations();
+    logger.i('Total annotations from Hive: ${allAnnotations.length}');
+    final ann = allAnnotations.firstWhere(
       (a) => a.id == hiveId,
-      orElse: () {
-        logger.w('Annotation with hiveId: $hiveId not found in the list.');
-        return Annotation(id: 'notFound');
-      },
+      orElse: () => Annotation(id: 'notFound'),
     );
 
     if (ann.id == 'notFound') {
@@ -107,12 +211,12 @@ class AnnotationActions {
       logger.i('Found annotation in Hive: $ann');
     }
 
-    // 3. Show edit form
+    // Show form dialog
     final title = ann.title ?? '';
-    final startDate = ann.startDate ?? '';
     final note = ann.note ?? '';
+    final startDate = ann.startDate ?? '';
     final iconName = ann.iconName ?? 'cross';
-    IconData chosenIcon = Icons.star;  // or however you pick an icon
+    IconData chosenIcon = Icons.star;
 
     final result = await showAnnotationFormDialog(
       context,
@@ -123,7 +227,7 @@ class AnnotationActions {
     );
 
     if (result != null) {
-      // 4. Build updated annotation
+      // Build updated
       final updatedNote = result['note'] ?? '';
       final updatedImagePath = result['imagePath'];
 
@@ -133,7 +237,7 @@ class AnnotationActions {
         id: ann.id,
         title: title.isNotEmpty ? title : null,
         iconName: iconName.isNotEmpty ? iconName : null,
-        startDate: startDate.isNotEmpty ? startDate : null,
+        startDate: ann.startDate,
         endDate: ann.endDate,
         note: updatedNote.isNotEmpty ? updatedNote : null,
         latitude: ann.latitude ?? 0.0,
@@ -143,11 +247,11 @@ class AnnotationActions {
             : ann.imagePath,
       );
 
-      // 5. Update in Hive
+      // Update in Hive
       await localRepo.updateAnnotation(updatedAnnotation);
       logger.i('Annotation updated in Hive with id: ${ann.id}');
 
-      // 6. Remove the old annotation visually & add the updated one
+      // Remove old & add updated
       await annotationsManager.removeAnnotation(mapAnnotation);
 
       final iconBytes = await rootBundle.load('assets/icons/${updatedAnnotation.iconName ?? 'cross'}.png');
@@ -163,7 +267,7 @@ class AnnotationActions {
         date: updatedAnnotation.startDate ?? '',
       );
 
-      // 7. Re-link the updated annotation
+      // Re-link
       annotationIdLinker.registerAnnotationId(
         newMapAnnotation.id,
         updatedAnnotation.id,
@@ -176,14 +280,13 @@ class AnnotationActions {
   }
 
   // ---------------------------------------------------------------
-  //      The connect_banner "UI" code now placed in this file
+  //      The connect_banner "UI" code
   // ---------------------------------------------------------------
   Widget buildConnectModeBanner({
     required bool isConnectMode,
     required VoidCallback onCancel,
     required MapboxMap mapboxMap,
   }) {
-    // If connect mode is off, return an empty widget
     if (!isConnectMode) return const SizedBox.shrink();
 
     return Positioned(
@@ -208,11 +311,8 @@ class AnnotationActions {
               const SizedBox(height: 8),
               ElevatedButton(
                 onPressed: () {
-                  // This is your "Cancel" callback
-                  onCancel();
-                  // Or, if you want to call a "disableConnect" logic 
-                  // in this same class, you can do it here.
-                  cancelConnectMode();
+                  onCancel();    // EarthMapPage callback
+                  cancelConnectMode(); // domain logic
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.red,
@@ -222,6 +322,100 @@ class AnnotationActions {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------
+// Inline DraggableAnnotationOverlay code
+// ---------------------------------------------------------------------
+class _DraggableAnnotationOverlay extends StatefulWidget {
+  final Point initialPosition;
+  final Function(Point) onDragUpdate;
+  final VoidCallback onDragEnd;
+  final MapboxMap mapboxMap;
+
+  const _DraggableAnnotationOverlay({
+    Key? key,
+    required this.initialPosition,
+    required this.onDragUpdate,
+    required this.onDragEnd,
+    required this.mapboxMap,
+  }) : super(key: key);
+
+  @override
+  State<_DraggableAnnotationOverlay> createState() => _DraggableAnnotationOverlayState();
+}
+
+class _DraggableAnnotationOverlayState extends State<_DraggableAnnotationOverlay> {
+  Offset _position = Offset.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializePosition();
+  }
+
+  Future<void> _initializePosition() async {
+    final screenPoint = await widget.mapboxMap.pixelForCoordinate(widget.initialPosition);
+    setState(() {
+      _position = Offset(screenPoint.x, screenPoint.y);
+    });
+  }
+
+  @override
+  void didUpdateWidget(_DraggableAnnotationOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialPosition != widget.initialPosition) {
+      _initializePosition();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        Positioned(
+          left: _position.dx - 15, // Center the widget on the position
+          top: _position.dy - 15,
+          child: GestureDetector(
+            onPanUpdate: (details) async {
+              final newPosition = Offset(
+                _position.dx + details.delta.dx,
+                _position.dy + details.delta.dy,
+              );
+
+              final screenCoord = ScreenCoordinate(
+                x: newPosition.dx,
+                y: newPosition.dy,
+              );
+
+              final mapPoint = await widget.mapboxMap.coordinateForPixel(screenCoord);
+              widget.onDragUpdate(mapPoint);
+
+              setState(() {
+                _position = newPosition;
+              });
+            },
+            onPanEnd: (details) {
+              widget.onDragEnd();
+            },
+            child: _buildDragWidget(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDragWidget() {
+    return Container(
+      width: 30,
+      height: 30,
+      decoration: BoxDecoration(
+        color: Colors.blue.withOpacity(0.5),
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 2),
       ),
     );
   }

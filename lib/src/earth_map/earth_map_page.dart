@@ -18,7 +18,6 @@ import 'package:map_mvp_project/src/earth_map/misc/test_utils.dart';
 import 'package:map_mvp_project/src/earth_map/annotations/annotation_menu.dart';
 import 'package:map_mvp_project/src/earth_map/annotations/annotation_actions.dart';
 
-
 /// The main EarthMapPage, which sets up the map, annotations, and various UI widgets.
 class EarthMapPage extends StatefulWidget {
   final WorldConfig worldConfig;
@@ -47,14 +46,14 @@ class EarthMapPageState extends State<EarthMapPage> {
   Offset _annotationMenuOffset = Offset.zero;
 
   // ---------------------- Dragging & Connect Mode ----------------------
-  bool _isDragging = false;
-  bool _isConnectMode = false;  // Toggles the "Connect Banner"
+  bool _isDragging = false;   // We'll reuse this for "move mode"
+  bool _isConnectMode = false;  
   String get _annotationButtonText => _isDragging ? 'Lock' : 'Move';
 
   // ---------------------- UUID Generator ----------------------
   final uuid = Uuid();
 
-  // 2. Reference to AnnotationActions for domain logic (edit, connect, etc.)
+  // Domain logic for edit, connect, move, etc.
   late AnnotationActions _annotationActions;
 
   @override
@@ -84,22 +83,20 @@ class EarthMapPageState extends State<EarthMapPage> {
         throw Exception('Failed to initialize map annotations');
       });
 
-      // Create a single LocalAnnotationsRepository
+      // Local repo + annotation linker
       _localRepo = LocalAnnotationsRepository();
-
-      // Create a *single* shared AnnotationIdLinker instance
       final annotationIdLinker = AnnotationIdLinker();
 
-      // Create our MapAnnotationsManager
+      // MapAnnotationsManager
       _annotationsManager = MapAnnotationsManager(
         annotationManager,
         annotationIdLinker: annotationIdLinker,
         localAnnotationsRepository: _localRepo,
       );
 
-      // Create the gesture handler
+      // MapGestureHandler
       _gestureHandler = MapGestureHandler(
-        mapboxMap: mapboxMap,
+        mapboxMap: _mapboxMap,
         annotationsManager: _annotationsManager,
         context: context,
         localAnnotationsRepository: _localRepo,
@@ -109,14 +106,13 @@ class EarthMapPageState extends State<EarthMapPage> {
         onDragEnd: _handleDragEnd,
         onAnnotationRemoved: _handleAnnotationRemoved,
         onConnectModeDisabled: () {
-          // Called if MapGestureHandler had a disableConnectMode() callback
           setState(() {
             _isConnectMode = false;
           });
         },
       );
 
-      // 3. Initialize your AnnotationActions
+      // AnnotationActions
       _annotationActions = AnnotationActions(
         localRepo: _localRepo,
         annotationsManager: _annotationsManager,
@@ -125,9 +121,9 @@ class EarthMapPageState extends State<EarthMapPage> {
 
       logger.i('Map initialization completed successfully');
 
-      // Once the map is ready, load saved Hive annotations
       if (mounted) {
         setState(() => _isMapReady = true);
+        // Load Hive annotations
         await _annotationsManager.loadAnnotationsFromHive();
       }
     } catch (e, stackTrace) {
@@ -142,7 +138,7 @@ class EarthMapPageState extends State<EarthMapPage> {
   //                 ANNOTATION UI & CALLBACKS
   // ---------------------------------------------------------------------
   void _handleAnnotationLongPress(PointAnnotation annotation, Point annotationPosition) async {
-    // Show the annotation menu near the pressed location
+    // Show annotation menu near the press
     final screenPos = await _mapboxMap.pixelForCoordinate(annotationPosition);
     setState(() {
       _annotationMenuAnnotation = annotation;
@@ -152,7 +148,7 @@ class EarthMapPageState extends State<EarthMapPage> {
   }
 
   void _handleAnnotationDragUpdate(PointAnnotation annotation) async {
-    // Keep the annotation menu following the annotation during drag
+    // Move the annotation menu as we drag
     final screenPos = await _mapboxMap.pixelForCoordinate(annotation.geometry);
     setState(() {
       _annotationMenuAnnotation = annotation;
@@ -161,11 +157,10 @@ class EarthMapPageState extends State<EarthMapPage> {
   }
 
   void _handleDragEnd() {
-    // Drag ended - no special action needed here
+    // Drag ended
   }
 
   void _handleAnnotationRemoved() {
-    // If an annotation is removed while the menu is open
     setState(() {
       _showAnnotationMenu = false;
       _annotationMenuAnnotation = null;
@@ -174,11 +169,10 @@ class EarthMapPageState extends State<EarthMapPage> {
   }
 
   // ---------------------------------------------------------------------
-  //                          LONG PRESS HANDLERS
+  //                        LONG PRESS HANDLERS
   // ---------------------------------------------------------------------
   void _handleLongPress(LongPressStartDetails details) {
     try {
-      logger.i('Long press started at: ${details.localPosition}');
       final screenPoint = ScreenCoordinate(
         x: details.localPosition.dx,
         y: details.localPosition.dy,
@@ -190,27 +184,18 @@ class EarthMapPageState extends State<EarthMapPage> {
   }
 
   void _handleLongPressMoveUpdate(LongPressMoveUpdateDetails details) {
-    try {
-      if (_isDragging) {
-        final screenPoint = ScreenCoordinate(
-          x: details.localPosition.dx,
-          y: details.localPosition.dy,
-        );
-        _gestureHandler.handleDrag(screenPoint);
-      }
-    } catch (e, stackTrace) {
-      logger.e('Error handling drag update', error: e, stackTrace: stackTrace);
+    if (_isDragging) {
+      final screenPoint = ScreenCoordinate(
+        x: details.localPosition.dx,
+        y: details.localPosition.dy,
+      );
+      _gestureHandler.handleDrag(screenPoint);
     }
   }
 
   void _handleLongPressEnd(LongPressEndDetails details) {
-    try {
-      logger.i('Long press ended');
-      if (_isDragging) {
-        _gestureHandler.endDrag();
-      }
-    } catch (e, stackTrace) {
-      logger.e('Error handling long press end', error: e, stackTrace: stackTrace);
+    if (_isDragging) {
+      _gestureHandler.endDrag();
     }
   }
 
@@ -218,14 +203,33 @@ class EarthMapPageState extends State<EarthMapPage> {
   //                         MENU BUTTON CALLBACKS
   // ---------------------------------------------------------------------
   void _handleMoveOrLockButton() {
-    setState(() {
-      if (_isDragging) {
-        _gestureHandler.hideTrashCanAndStopDragging();
-        _isDragging = false;
-      } else {
-        _gestureHandler.startDraggingSelectedAnnotation();
-        _isDragging = true;
+    // “Move” or "Lock"
+    // If we are NOT dragging => start move
+    if (!_isDragging) {
+      if (_annotationMenuAnnotation != null) {
+        // 1) Domain logic: start move
+        _annotationActions.startMoveAnnotation(_annotationMenuAnnotation!);
       }
+      setState(() {
+        _isDragging = true;
+      });
+    } else {
+      // If we are currently dragging => user clicked "Lock"
+      // So finalize or cancel the move
+      _isDragging = false;
+
+      // You could decide to finalize the position or revert here
+      // For example, if user just wants to revert:
+      //_annotationActions.cancelMoveAnnotation();
+
+      // Or if user wants to finalize automatically
+      // (But we've made logic that the drag ends onPanEnd => finish automatically)
+      setState(() {});
+    }
+
+    // Hide menu now
+    setState(() {
+      _showAnnotationMenu = false;
     });
   }
 
@@ -234,36 +238,28 @@ class EarthMapPageState extends State<EarthMapPage> {
       logger.w('No annotation selected to edit.');
       return;
     }
-    // Delegate the edit logic to AnnotationActions
     await _annotationActions.editAnnotation(
       context: context,
       mapAnnotation: _annotationMenuAnnotation!,
     );
-
-    // Possibly refresh or hide the menu
     setState(() {});
   }
 
-  /// "Connect" button callback: enable connect mode & call AnnotationActions
   void _handleConnectButton() {
-    logger.i('Connect button clicked');
     setState(() {
       _showAnnotationMenu = false;
       if (_isDragging) {
-        _gestureHandler.hideTrashCanAndStopDragging();
+        // if we were dragging, let's stop
+        _annotationActions.cancelMoveAnnotation();
         _isDragging = false;
       }
-      _isConnectMode = true; // triggers the connect banner
+      _isConnectMode = true;
     });
 
     if (_annotationMenuAnnotation != null) {
-      // If you still want to do "low-level connect" in the gesture handler:
-      _annotationActions.startConnectMode(_annotationMenuAnnotation!);
-
-      // Also call your domain logic in AnnotationActions
       _annotationActions.startConnectMode(_annotationMenuAnnotation!);
     } else {
-      logger.w('No annotation available when Connect pressed');
+      logger.w('No annotation to connect');
     }
   }
 
@@ -272,14 +268,14 @@ class EarthMapPageState extends State<EarthMapPage> {
       _showAnnotationMenu = false;
       _annotationMenuAnnotation = null;
       if (_isDragging) {
-        _gestureHandler.hideTrashCanAndStopDragging();
+        _annotationActions.cancelMoveAnnotation();
         _isDragging = false;
       }
     });
   }
 
   // ---------------------------------------------------------------------
-  //                            UI BUILDERS
+  //                         UI BUILDERS
   // ---------------------------------------------------------------------
   Widget _buildMapWidget() {
     return GestureDetector(
@@ -287,7 +283,6 @@ class EarthMapPageState extends State<EarthMapPage> {
       onLongPressMoveUpdate: _handleLongPressMoveUpdate,
       onLongPressEnd: _handleLongPressEnd,
       onLongPressCancel: () {
-        logger.i('Long press cancelled');
         if (_isDragging) {
           _gestureHandler.endDrag();
         }
@@ -300,20 +295,16 @@ class EarthMapPageState extends State<EarthMapPage> {
     );
   }
 
-  // ---------------------------------------------------------------------
-  //                            BUILD METHOD
-  // ---------------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Stack(
         children: [
-          // The main map widget
+          // The main map
           _buildMapWidget(),
 
-          // Only show these overlays if the map is ready
           if (_isMapReady) ...[
-            // TIMELINE BUTTON
+            // TIMELINE
             buildTimelineButton(
               isMapReady: _isMapReady,
               context: context,
@@ -330,13 +321,11 @@ class EarthMapPageState extends State<EarthMapPage> {
                 });
               },
             ),
-
-            // DEBUG UTILITY BUTTONS
             buildClearAnnotationsButton(annotationsManager: _annotationsManager),
             buildClearImagesButton(),
             buildDeleteImagesFolderButton(),
 
-            // SEARCH WIDGET
+            // SEARCH
             EarthMapSearchWidget(
               mapboxMap: _mapboxMap,
               annotationsManager: _annotationsManager,
@@ -345,7 +334,7 @@ class EarthMapPageState extends State<EarthMapPage> {
               uuid: uuid,
             ),
 
-            // ANNOTATION MENU (Move/Edit/Connect/Cancel)
+            // The annotation menu
             AnnotationMenu(
               show: _showAnnotationMenu,
               annotation: _annotationMenuAnnotation,
@@ -358,21 +347,23 @@ class EarthMapPageState extends State<EarthMapPage> {
               onCancel: _handleCancelButton,
             ),
 
-            // CONNECT MODE BANNER from annotation_actions.dart
+            // CONNECT BANNER
             _annotationActions.buildConnectModeBanner(
               isConnectMode: _isConnectMode,
               onCancel: () {
-                // If the user cancels from the banner:
-                setState(() {
-                  _isConnectMode = false;
-                });
-                // Reset domain logic in AnnotationActions
+                setState(() => _isConnectMode = false);
                 _annotationActions.cancelConnectMode();
               },
               mapboxMap: _mapboxMap,
             ),
 
-            // TIMELINE CANVAS
+            // The new "Move" overlay for dragging
+            _annotationActions.buildMoveOverlay(
+              isMoveMode: _isDragging,
+              mapboxMap: _mapboxMap,
+            ),
+
+            // TIMELINE
             buildTimelineCanvas(
               showTimelineCanvas: _showTimelineCanvas,
               hiveUuids: _hiveUuidsForTimeline,
