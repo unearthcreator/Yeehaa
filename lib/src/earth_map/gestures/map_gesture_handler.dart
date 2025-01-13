@@ -35,8 +35,6 @@ class MapGestureHandler {
   final MapAnnotationsManager annotationsManager;
   final BuildContext context;
   final LocalAnnotationsRepository localAnnotationsRepository;
-
-  /// Use this for mapping between the map's annotation ID and the Hive annotation ID.
   final AnnotationIdLinker annotationIdLinker;
 
   final AnnotationLongPressCallback? onAnnotationLongPress;
@@ -44,8 +42,9 @@ class MapGestureHandler {
   final DragEndCallback? onDragEnd;
   final AnnotationRemovedCallback? onAnnotationRemoved;
 
-  // Callback to notify when connect mode is disabled
-  VoidCallback? onConnectModeDisabled;
+  // If you no longer need to notify about connect mode changes,
+  // you could remove this entirely. Otherwise, keep it if the UI expects it.
+  final VoidCallback? onConnectModeDisabled;
 
   Timer? _longPressTimer;
   Timer? _placementDialogTimer;
@@ -60,20 +59,22 @@ class MapGestureHandler {
 
   String? _chosenTitle;
   String? _chosenStartDate;
-  String? _chosenEndDate; // new variable for endDate
-  String _chosenIconName = "mapbox-check"; // Default icon
+  String? _chosenEndDate; 
+  String _chosenIconName = "mapbox-check"; 
   final uuid = Uuid();
 
-  // Connect mode state
-  bool _isConnectMode = false;
-  PointAnnotation? _firstConnectAnnotation;
+  // -----------------------------------------------------
+  //  Removed _isConnectMode, _firstConnectAnnotation, 
+  //  enableConnectMode(), disableConnectMode(), 
+  //  _handleConnectModeClick() for the new approach.
+  // -----------------------------------------------------
 
   MapGestureHandler({
     required this.mapboxMap,
     required this.annotationsManager,
     required this.context,
     required this.localAnnotationsRepository,
-    required this.annotationIdLinker, // We rely on the linker for ID mapping
+    required this.annotationIdLinker,
     this.onAnnotationLongPress,
     this.onAnnotationDragUpdate,
     this.onDragEnd,
@@ -84,50 +85,24 @@ class MapGestureHandler {
     annotationsManager.pointAnnotationManager.addOnPointAnnotationClickListener(
       MyPointAnnotationClickListener((clickedAnnotation) {
         logger.i('Annotation tapped: ${clickedAnnotation.id}');
-        if (_isConnectMode) {
-          _handleConnectModeClick(clickedAnnotation);
+
+        // Normal flow: attempt to show details
+        final hiveId = annotationIdLinker.getHiveIdForMapId(clickedAnnotation.id);
+        if (hiveId != null) {
+          _showAnnotationDetailsById(hiveId);
         } else {
-          // Normal mode: show details
-          final hiveId = annotationIdLinker.getHiveIdForMapId(clickedAnnotation.id);
-          if (hiveId != null) {
-            _showAnnotationDetailsById(hiveId);
-          } else {
-            logger.w('No recorded Hive id for tapped annotation ${clickedAnnotation.id}');
-          }
+          logger.w('No recorded Hive id for tapped annotation ${clickedAnnotation.id}');
         }
       }),
     );
   }
 
-  void enableConnectMode(PointAnnotation firstAnnotation) {
-    logger.i('Connect mode enabled with first annotation: ${firstAnnotation.id}');
-    _isConnectMode = true;
-    _firstConnectAnnotation = firstAnnotation;
-  }
-
-  void disableConnectMode() {
-    logger.i('Connect mode disabled.');
-    _isConnectMode = false;
-    _firstConnectAnnotation = null;
-    onConnectModeDisabled?.call();
-  }
-
-  Future<void> _handleConnectModeClick(PointAnnotation clickedAnnotation) async {
-    if (_firstConnectAnnotation == null) {
-      logger.w('First connect annotation was null, but connect mode was enabled!');
-      _firstConnectAnnotation = clickedAnnotation;
-      logger.i('First annotation chosen for connection (fallback): ${clickedAnnotation.id}');
-    } else {
-      // We have a first annotation; now this is the second
-      logger.i('Second annotation chosen for connection: ${clickedAnnotation.id}');
-      // (implement line drawing or other logic if needed)
-      disableConnectMode();
-    }
-  }
-
   Future<void> _showAnnotationDetailsById(String id) async {
     final allAnnotations = await localAnnotationsRepository.getAnnotations();
-    final ann = allAnnotations.firstWhere((a) => a.id == id, orElse: () => Annotation(id: 'notFound'));
+    final ann = allAnnotations.firstWhere(
+      (a) => a.id == id,
+      orElse: () => Annotation(id: 'notFound')
+    );
     if (ann.id != 'notFound') {
       showAnnotationDetailsDialog(context, ann);
     } else {

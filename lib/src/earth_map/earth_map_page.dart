@@ -10,18 +10,14 @@ import 'package:map_mvp_project/src/earth_map/annotations/map_annotations_manage
 import 'package:map_mvp_project/src/earth_map/gestures/map_gesture_handler.dart';
 import 'package:map_mvp_project/src/earth_map/utils/map_config.dart';
 import 'package:uuid/uuid.dart'; // for unique IDs
-import 'package:map_mvp_project/models/annotation.dart'; // for Annotation model
-import 'package:map_mvp_project/src/earth_map/dialogs/annotation_form_dialog.dart';
 import 'package:map_mvp_project/src/earth_map/timeline/timeline.dart';
 import 'package:map_mvp_project/src/earth_map/annotations/annotation_id_linker.dart';
 import 'package:map_mvp_project/models/world_config.dart';
 import 'package:map_mvp_project/src/earth_map/search/search_widget.dart';
 import 'package:map_mvp_project/src/earth_map/misc/test_utils.dart';
-import 'package:map_mvp_project/src/earth_map/utils/connect_banner.dart';
 import 'package:map_mvp_project/src/earth_map/annotations/annotation_menu.dart';
-
-// 1. Import your new actions class
 import 'package:map_mvp_project/src/earth_map/annotations/annotation_actions.dart';
+
 
 /// The main EarthMapPage, which sets up the map, annotations, and various UI widgets.
 class EarthMapPage extends StatefulWidget {
@@ -52,13 +48,13 @@ class EarthMapPageState extends State<EarthMapPage> {
 
   // ---------------------- Dragging & Connect Mode ----------------------
   bool _isDragging = false;
-  bool _isConnectMode = false;
+  bool _isConnectMode = false;  // Toggles the "Connect Banner"
   String get _annotationButtonText => _isDragging ? 'Lock' : 'Move';
 
   // ---------------------- UUID Generator ----------------------
   final uuid = Uuid();
 
-  // 2. Keep a reference to your new AnnotationActions
+  // 2. Reference to AnnotationActions for domain logic (edit, connect, etc.)
   late AnnotationActions _annotationActions;
 
   @override
@@ -113,13 +109,14 @@ class EarthMapPageState extends State<EarthMapPage> {
         onDragEnd: _handleDragEnd,
         onAnnotationRemoved: _handleAnnotationRemoved,
         onConnectModeDisabled: () {
+          // Called if MapGestureHandler had a disableConnectMode() callback
           setState(() {
             _isConnectMode = false;
           });
         },
       );
 
-      // 3. Initialize your new AnnotationActions instance
+      // 3. Initialize your AnnotationActions
       _annotationActions = AnnotationActions(
         localRepo: _localRepo,
         annotationsManager: _annotationsManager,
@@ -145,6 +142,7 @@ class EarthMapPageState extends State<EarthMapPage> {
   //                 ANNOTATION UI & CALLBACKS
   // ---------------------------------------------------------------------
   void _handleAnnotationLongPress(PointAnnotation annotation, Point annotationPosition) async {
+    // Show the annotation menu near the pressed location
     final screenPos = await _mapboxMap.pixelForCoordinate(annotationPosition);
     setState(() {
       _annotationMenuAnnotation = annotation;
@@ -154,6 +152,7 @@ class EarthMapPageState extends State<EarthMapPage> {
   }
 
   void _handleAnnotationDragUpdate(PointAnnotation annotation) async {
+    // Keep the annotation menu following the annotation during drag
     final screenPos = await _mapboxMap.pixelForCoordinate(annotation.geometry);
     setState(() {
       _annotationMenuAnnotation = annotation;
@@ -162,10 +161,11 @@ class EarthMapPageState extends State<EarthMapPage> {
   }
 
   void _handleDragEnd() {
-    // Drag ended - no special action here
+    // Drag ended - no special action needed here
   }
 
   void _handleAnnotationRemoved() {
+    // If an annotation is removed while the menu is open
     setState(() {
       _showAnnotationMenu = false;
       _annotationMenuAnnotation = null;
@@ -229,27 +229,22 @@ class EarthMapPageState extends State<EarthMapPage> {
     });
   }
 
-  /// 4. Instead of `_editAnnotation`, we call `_annotationActions.editAnnotation(...)`.
   Future<void> _handleEditButton() async {
     if (_annotationMenuAnnotation == null) {
       logger.w('No annotation selected to edit.');
       return;
     }
-
-    // Delegate to your AnnotationActions
+    // Delegate the edit logic to AnnotationActions
     await _annotationActions.editAnnotation(
       context: context,
       mapAnnotation: _annotationMenuAnnotation!,
     );
 
-    // Optionally update or re-check your local state if needed:
-    setState(() {
-      // If annotationActions does the re-linking,
-      // you might want to store the new annotation in _annotationMenuAnnotation
-      // or hide the menu, etc.
-    });
+    // Possibly refresh or hide the menu
+    setState(() {});
   }
 
+  /// "Connect" button callback: enable connect mode & call AnnotationActions
   void _handleConnectButton() {
     logger.i('Connect button clicked');
     setState(() {
@@ -258,10 +253,15 @@ class EarthMapPageState extends State<EarthMapPage> {
         _gestureHandler.hideTrashCanAndStopDragging();
         _isDragging = false;
       }
-      _isConnectMode = true;
+      _isConnectMode = true; // triggers the connect banner
     });
+
     if (_annotationMenuAnnotation != null) {
-      _gestureHandler.enableConnectMode(_annotationMenuAnnotation!);
+      // If you still want to do "low-level connect" in the gesture handler:
+      _annotationActions.startConnectMode(_annotationMenuAnnotation!);
+
+      // Also call your domain logic in AnnotationActions
+      _annotationActions.startConnectMode(_annotationMenuAnnotation!);
     } else {
       logger.w('No annotation available when Connect pressed');
     }
@@ -345,7 +345,7 @@ class EarthMapPageState extends State<EarthMapPage> {
               uuid: uuid,
             ),
 
-            // ANNOTATION MENU
+            // ANNOTATION MENU (Move/Edit/Connect/Cancel)
             AnnotationMenu(
               show: _showAnnotationMenu,
               annotation: _annotationMenuAnnotation,
@@ -358,16 +358,18 @@ class EarthMapPageState extends State<EarthMapPage> {
               onCancel: _handleCancelButton,
             ),
 
-            // CONNECT MODE BANNER
-            buildConnectModeBanner(
+            // CONNECT MODE BANNER from annotation_actions.dart
+            _annotationActions.buildConnectModeBanner(
               isConnectMode: _isConnectMode,
-              gestureHandler: _gestureHandler,
               onCancel: () {
-                // Called if user taps "Cancel"
+                // If the user cancels from the banner:
                 setState(() {
                   _isConnectMode = false;
                 });
+                // Reset domain logic in AnnotationActions
+                _annotationActions.cancelConnectMode();
               },
+              mapboxMap: _mapboxMap,
             ),
 
             // TIMELINE CANVAS

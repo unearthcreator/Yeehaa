@@ -1,9 +1,9 @@
-// annotation_actions.dart
+// File: annotation_actions.dart
+
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
-
 import 'package:map_mvp_project/models/annotation.dart';
 import 'package:map_mvp_project/repositories/local_annotations_repository.dart';
 import 'package:map_mvp_project/src/earth_map/annotations/map_annotations_manager.dart';
@@ -16,14 +16,58 @@ class AnnotationActions {
   final MapAnnotationsManager annotationsManager;
   final AnnotationIdLinker annotationIdLinker;
 
+  // ---------------------------------------------------------------
+  //         STATE FOR "CONNECT MODE" (first vs second annotation)
+  // ---------------------------------------------------------------
+  bool _isInConnectMode = false;
+  PointAnnotation? _firstConnectAnnotation;
+
   AnnotationActions({
     required this.localRepo,
     required this.annotationsManager,
     required this.annotationIdLinker,
   });
 
-  /// Edits the given map annotation by retrieving its data from Hive,
-  /// showing the form dialog, and updating it.
+  // ---------------------------------------------------------------
+  //                  Connect Mode Methods
+  // ---------------------------------------------------------------
+  void startConnectMode(PointAnnotation firstAnnotation) {
+    logger.i('AnnotationActions: startConnectMode with annotation: ${firstAnnotation.id}');
+    _isInConnectMode = true;
+    _firstConnectAnnotation = firstAnnotation;
+  }
+
+  void cancelConnectMode() {
+    logger.i('AnnotationActions: cancelConnectMode.');
+    _isInConnectMode = false;
+    _firstConnectAnnotation = null;
+  }
+
+  /// Call this when the user taps the second annotation
+  /// while we're in connect mode. This is where you'd do
+  /// your "linking" or "drawing lines" or "storing connection" logic.
+  Future<void> finishConnectMode(PointAnnotation secondAnnotation) async {
+    if (!_isInConnectMode || _firstConnectAnnotation == null) {
+      logger.w('finishConnectMode called but we are not actually in connect mode or have no first annotation.');
+      return;
+    }
+    logger.i('AnnotationActions: finishConnectMode connecting ${_firstConnectAnnotation!.id} with ${secondAnnotation.id}.');
+
+    // Example: If "connecting" means you store a line in Hive or do something else,
+    // place that logic here. For now, just log it.
+    // e.g.:
+    // await localRepo.addConnection(_firstConnectAnnotation!.id, secondAnnotation.id);
+
+    // Once done, clear the state
+    _isInConnectMode = false;
+    _firstConnectAnnotation = null;
+
+    logger.i('AnnotationActions: connect mode finished, returning to normal mode.');
+  }
+
+  // ---------------------------------------------------------------
+  //           Existing Edit Logic (unchanged)
+  // ---------------------------------------------------------------
   Future<void> editAnnotation({
     required BuildContext context,
     required PointAnnotation? mapAnnotation,
@@ -94,8 +138,8 @@ class AnnotationActions {
         note: updatedNote.isNotEmpty ? updatedNote : null,
         latitude: ann.latitude ?? 0.0,
         longitude: ann.longitude ?? 0.0,
-        imagePath: (updatedImagePath != null && updatedImagePath.isNotEmpty) 
-            ? updatedImagePath 
+        imagePath: (updatedImagePath != null && updatedImagePath.isNotEmpty)
+            ? updatedImagePath
             : ann.imagePath,
       );
 
@@ -129,5 +173,56 @@ class AnnotationActions {
     } else {
       logger.i('User cancelled edit.');
     }
+  }
+
+  // ---------------------------------------------------------------
+  //      The connect_banner "UI" code now placed in this file
+  // ---------------------------------------------------------------
+  Widget buildConnectModeBanner({
+    required bool isConnectMode,
+    required VoidCallback onCancel,
+    required MapboxMap mapboxMap,
+  }) {
+    // If connect mode is off, return an empty widget
+    if (!isConnectMode) return const SizedBox.shrink();
+
+    return Positioned(
+      top: 50,
+      left: null,
+      right: null,
+      child: Center(
+        child: Container(
+          width: 300,
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.7),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            children: [
+              const Text(
+                'Click another annotation to connect, or cancel.',
+                style: TextStyle(color: Colors.white),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              ElevatedButton(
+                onPressed: () {
+                  // This is your "Cancel" callback
+                  onCancel();
+                  // Or, if you want to call a "disableConnect" logic 
+                  // in this same class, you can do it here.
+                  cancelConnectMode();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                ),
+                child: const Text('Cancel'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
