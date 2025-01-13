@@ -143,7 +143,7 @@ class AnnotationActions {
 
   /// Returns a widget that draws a transparent overlay + draggable circle
   /// for the user to move the annotation around on the map.
-    Widget buildMoveOverlay({
+  Widget buildMoveOverlay({
     required bool isMoveMode,
     required MapboxMap mapboxMap,
   }) {
@@ -360,6 +360,7 @@ class _DraggableAnnotationOverlayState extends State<_DraggableAnnotationOverlay
   Future<void> _initializePosition() async {
     final screenPoint = await widget.mapboxMap.pixelForCoordinate(widget.initialPosition);
     setState(() {
+      // Center the circle so its middle is at screenPoint
       _position = Offset(screenPoint.x, screenPoint.y);
     });
   }
@@ -377,7 +378,8 @@ class _DraggableAnnotationOverlayState extends State<_DraggableAnnotationOverlay
     return Stack(
       children: [
         Positioned(
-          left: _position.dx - 15, // Center the widget on the position
+          // Shift by 15 so the circle's center is at _position
+          left: _position.dx - 15,
           top: _position.dy - 15,
           child: GestureDetector(
             onPanUpdate: (details) async {
@@ -392,7 +394,9 @@ class _DraggableAnnotationOverlayState extends State<_DraggableAnnotationOverlay
               );
 
               final mapPoint = await widget.mapboxMap.coordinateForPixel(screenCoord);
-              widget.onDragUpdate(mapPoint);
+              if (mapPoint != null) {
+                widget.onDragUpdate(mapPoint);
+              }
 
               setState(() {
                 _position = newPosition;
