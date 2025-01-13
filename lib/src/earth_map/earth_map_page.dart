@@ -20,6 +20,9 @@ import 'package:map_mvp_project/src/earth_map/misc/test_utils.dart';
 import 'package:map_mvp_project/src/earth_map/utils/connect_banner.dart';
 import 'package:map_mvp_project/src/earth_map/annotations/annotation_menu.dart';
 
+// 1. Import your new actions class
+import 'package:map_mvp_project/src/earth_map/annotations/annotation_actions.dart';
+
 /// The main EarthMapPage, which sets up the map, annotations, and various UI widgets.
 class EarthMapPage extends StatefulWidget {
   final WorldConfig worldConfig;
@@ -55,6 +58,9 @@ class EarthMapPageState extends State<EarthMapPage> {
   // ---------------------- UUID Generator ----------------------
   final uuid = Uuid();
 
+  // 2. Keep a reference to your new AnnotationActions
+  late AnnotationActions _annotationActions;
+
   @override
   void initState() {
     super.initState();
@@ -88,14 +94,14 @@ class EarthMapPageState extends State<EarthMapPage> {
       // Create a *single* shared AnnotationIdLinker instance
       final annotationIdLinker = AnnotationIdLinker();
 
-      // Create our MapAnnotationsManager, passing the single linker
+      // Create our MapAnnotationsManager
       _annotationsManager = MapAnnotationsManager(
         annotationManager,
         annotationIdLinker: annotationIdLinker,
         localAnnotationsRepository: _localRepo,
       );
 
-      // Set up the gesture handler
+      // Create the gesture handler
       _gestureHandler = MapGestureHandler(
         mapboxMap: mapboxMap,
         annotationsManager: _annotationsManager,
@@ -111,6 +117,13 @@ class EarthMapPageState extends State<EarthMapPage> {
             _isConnectMode = false;
           });
         },
+      );
+
+      // 3. Initialize your new AnnotationActions instance
+      _annotationActions = AnnotationActions(
+        localRepo: _localRepo,
+        annotationsManager: _annotationsManager,
+        annotationIdLinker: annotationIdLinker,
       );
 
       logger.i('Map initialization completed successfully');
@@ -202,113 +215,6 @@ class EarthMapPageState extends State<EarthMapPage> {
   }
 
   // ---------------------------------------------------------------------
-  //                           EDITING ANNOTATIONS
-  // ---------------------------------------------------------------------
-  Future<void> _editAnnotation() async {
-    logger.i('_editAnnotation called');
-
-    if (_annotationMenuAnnotation == null) {
-      logger.w('No _annotationMenuAnnotation is set. Aborting edit.');
-      return;
-    }
-    logger.i('Attempting to edit annotation with map ID: ${_annotationMenuAnnotation!.id}');
-
-    // Retrieve the hiveId
-    final hiveId = _gestureHandler.annotationIdLinker
-        .getHiveIdForMapId(_annotationMenuAnnotation!.id);
-    logger.i('Hive ID from annotationIdLinker: $hiveId');
-
-    if (hiveId == null) {
-      logger.w('No hive ID found for this annotation.');
-      return;
-    }
-
-    final allHiveAnnotations = await _localRepo.getAnnotations();
-    logger.i('Total annotations retrieved from Hive: ${allHiveAnnotations.length}');
-
-    final ann = allHiveAnnotations.firstWhere(
-      (a) => a.id == hiveId,
-      orElse: () {
-        logger.w('Annotation with hiveId: $hiveId not found in the list.');
-        return Annotation(id: 'notFound');
-      },
-    );
-
-    if (ann.id == 'notFound') {
-      logger.w('Annotation not found in Hive.');
-      return;
-    } else {
-      logger.i('Found annotation in Hive: $ann');
-    }
-
-    // Show form dialog
-    final title = ann.title ?? '';
-    final startDate = ann.startDate ?? '';
-    final note = ann.note ?? '';
-    final iconName = ann.iconName ?? 'cross';
-    IconData chosenIcon = Icons.star;
-
-    final result = await showAnnotationFormDialog(
-      context,
-      title: title,
-      chosenIcon: chosenIcon,
-      date: startDate,
-      note: note,
-    );
-
-    if (result != null) {
-      final updatedNote = result['note'] ?? '';
-      final updatedImagePath = result['imagePath'];
-      final updatedFilePath = result['filePath'];
-
-      logger.i('User edited note: $updatedNote, imagePath: $updatedImagePath, filePath: $updatedFilePath');
-
-      final updatedAnnotation = Annotation(
-        id: ann.id,
-        title: title.isNotEmpty ? title : null,
-        iconName: iconName.isNotEmpty ? iconName : null,
-        startDate: startDate.isNotEmpty ? startDate : null,
-        endDate: ann.endDate,
-        note: updatedNote.isNotEmpty ? updatedNote : null,
-        latitude: ann.latitude ?? 0.0,
-        longitude: ann.longitude ?? 0.0,
-        imagePath: (updatedImagePath != null && updatedImagePath.isNotEmpty) 
-            ? updatedImagePath 
-            : ann.imagePath,
-      );
-
-      await _localRepo.updateAnnotation(updatedAnnotation);
-      logger.i('Annotation updated in Hive with id: ${ann.id}');
-
-      // Remove old and add updated visually
-      await _annotationsManager.removeAnnotation(_annotationMenuAnnotation!);
-      final iconBytes = await rootBundle.load('assets/icons/${updatedAnnotation.iconName ?? 'cross'}.png');
-      final imageData = iconBytes.buffer.asUint8List();
-
-      final mapAnnotation = await _annotationsManager.addAnnotation(
-        Point(coordinates: Position(updatedAnnotation.longitude ?? 0.0, updatedAnnotation.latitude ?? 0.0)),
-        image: imageData,
-        title: updatedAnnotation.title ?? '',
-        date: updatedAnnotation.startDate ?? '',
-      );
-
-      // Re-link
-      _gestureHandler.annotationIdLinker.registerAnnotationId(
-        mapAnnotation.id,
-        updatedAnnotation.id,
-      );
-
-      setState(() {
-        _annotationMenuAnnotation = mapAnnotation;
-      });
-
-      logger.i('Annotation visually updated on map.');
-    } else {
-      logger.i('User cancelled edit.');
-    }
-  }
-
-  // ---------------------------------------------------------------------
   //                         MENU BUTTON CALLBACKS
   // ---------------------------------------------------------------------
   void _handleMoveOrLockButton() {
@@ -323,8 +229,25 @@ class EarthMapPageState extends State<EarthMapPage> {
     });
   }
 
+  /// 4. Instead of `_editAnnotation`, we call `_annotationActions.editAnnotation(...)`.
   Future<void> _handleEditButton() async {
-    await _editAnnotation();
+    if (_annotationMenuAnnotation == null) {
+      logger.w('No annotation selected to edit.');
+      return;
+    }
+
+    // Delegate to your AnnotationActions
+    await _annotationActions.editAnnotation(
+      context: context,
+      mapAnnotation: _annotationMenuAnnotation!,
+    );
+
+    // Optionally update or re-check your local state if needed:
+    setState(() {
+      // If annotationActions does the re-linking,
+      // you might want to store the new annotation in _annotationMenuAnnotation
+      // or hide the menu, etc.
+    });
   }
 
   void _handleConnectButton() {
@@ -422,7 +345,7 @@ class EarthMapPageState extends State<EarthMapPage> {
               uuid: uuid,
             ),
 
-            // ANNOTATION MENU (new widget)
+            // ANNOTATION MENU
             AnnotationMenu(
               show: _showAnnotationMenu,
               annotation: _annotationMenuAnnotation,
