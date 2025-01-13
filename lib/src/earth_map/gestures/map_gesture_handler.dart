@@ -5,7 +5,6 @@ import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:map_mvp_project/services/error_handler.dart';
 import 'package:map_mvp_project/src/earth_map/annotations/map_annotations_manager.dart';
 import 'package:map_mvp_project/src/earth_map/dialogs/annotation_initialization_dialog.dart';
-import 'package:map_mvp_project/src/earth_map/dialogs/annotation_form_dialog.dart';
 import 'package:map_mvp_project/src/earth_map/dialogs/show_annotation_details_dialog.dart';
 import 'package:uuid/uuid.dart';
 import 'package:map_mvp_project/models/annotation.dart';

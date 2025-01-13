@@ -138,7 +138,6 @@ class EarthMapPageState extends State<EarthMapPage> {
   //                 ANNOTATION UI & CALLBACKS
   // ---------------------------------------------------------------------
   void _handleAnnotationLongPress(PointAnnotation annotation, Point annotationPosition) async {
-    // Show annotation menu near the press
     final screenPos = await _mapboxMap.pixelForCoordinate(annotationPosition);
     setState(() {
       _annotationMenuAnnotation = annotation;
@@ -148,7 +147,6 @@ class EarthMapPageState extends State<EarthMapPage> {
   }
 
   void _handleAnnotationDragUpdate(PointAnnotation annotation) async {
-    // Move the annotation menu as we drag
     final screenPos = await _mapboxMap.pixelForCoordinate(annotation.geometry);
     setState(() {
       _annotationMenuAnnotation = annotation;
@@ -203,32 +201,16 @@ class EarthMapPageState extends State<EarthMapPage> {
   //                         MENU BUTTON CALLBACKS
   // ---------------------------------------------------------------------
   void _handleMoveOrLockButton() {
-    // “Move” or "Lock"
-    // If we are NOT dragging => start move
-    if (!_isDragging) {
-      if (_annotationMenuAnnotation != null) {
-        // 1) Domain logic: start move
-        _annotationActions.startMoveAnnotation(_annotationMenuAnnotation!);
-      }
-      setState(() {
-        _isDragging = true;
-      });
-    } else {
-      // If we are currently dragging => user clicked "Lock"
-      // So finalize or cancel the move
-      _isDragging = false;
-
-      // You could decide to finalize the position or revert here
-      // For example, if user just wants to revert:
-      //_annotationActions.cancelMoveAnnotation();
-
-      // Or if user wants to finalize automatically
-      // (But we've made logic that the drag ends onPanEnd => finish automatically)
-      setState(() {});
-    }
-
-    // Hide menu now
     setState(() {
+      if (!_isDragging) {
+        if (_annotationMenuAnnotation != null) {
+          _annotationActions.startMoveAnnotation(_annotationMenuAnnotation!);
+        }
+        _isDragging = true;
+      } else {
+        _annotationActions.cancelMoveAnnotation(); 
+        _isDragging = false;
+      }
       _showAnnotationMenu = false;
     });
   }
@@ -249,7 +231,6 @@ class EarthMapPageState extends State<EarthMapPage> {
     setState(() {
       _showAnnotationMenu = false;
       if (_isDragging) {
-        // if we were dragging, let's stop
         _annotationActions.cancelMoveAnnotation();
         _isDragging = false;
       }
