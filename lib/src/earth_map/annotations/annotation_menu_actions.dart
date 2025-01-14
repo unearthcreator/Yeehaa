@@ -103,6 +103,7 @@ class AnnotationActions {
   }
 
   /// Finalize the new location in Hive, then exit move mode
+  /// (We're no longer calling this automatically onPanEnd.)
   Future<void> finishMoveAnnotation(Point newLocation) async {
     if (!_isInMoveMode || _movingAnnotation == null) {
       logger.w('finishMoveAnnotation called but not in move mode or annotation was null.');
@@ -175,15 +176,14 @@ class AnnotationActions {
       initialPosition: initialPoint,
       mapboxMap: mapboxMap,
       onDragUpdate: (Point newPoint) async {
-        // Safely check if _movingAnnotation still valid:
+        // Keep updating the annotation visually as the user drags
         if (_movingAnnotation != null) {
           await annotationsManager.updateVisualPosition(_movingAnnotation!, newPoint);
         }
       },
       onDragEnd: () {
-        if (_movingAnnotation != null) {
-          finishMoveAnnotation(_movingAnnotation!.geometry);
-        }
+        // NO LONGER finalize here, so the user can keep dragging if they want
+        logger.i('User lifted finger, but staying in move mode. No finalization yet.');
       },
     );
   }
@@ -387,9 +387,9 @@ class _DraggableAnnotationOverlayState extends State<_DraggableAnnotationOverlay
     return Stack(
       children: [
         Positioned(
-          // Subtract half the circle's diameter so the circle is centered
+          // If you want the circle’s center exactly on the annotation:
           left: _position.dx - 15,
-          top: _position.dy - 30,
+          top: _position.dy - 30, // or -15 if that anchors better for your icon
           child: GestureDetector(
             onPanUpdate: (details) async {
               // 1) Update local offset
@@ -414,7 +414,7 @@ class _DraggableAnnotationOverlayState extends State<_DraggableAnnotationOverlay
               });
             },
             onPanEnd: (details) {
-              // Tell parent we finished dragging
+              // We do NOT finalize here, so the user can pick it up again
               widget.onDragEnd();
             },
             child: _buildDragWidget(),
