@@ -1,6 +1,5 @@
-// File: annotation_actions.dart
-
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
@@ -11,6 +10,8 @@ import 'package:map_mvp_project/src/earth_map/annotations/annotation_id_linker.d
 import 'package:map_mvp_project/src/earth_map/dialogs/annotation_form_dialog.dart';
 import 'package:map_mvp_project/services/error_handler.dart';
 
+/// A class that handles various 'annotation actions', like connecting 
+/// two annotations, moving an annotation, or editing it.
 class AnnotationActions {
   final LocalAnnotationsRepository localRepo;
   final MapAnnotationsManager annotationsManager;
@@ -29,6 +30,9 @@ class AnnotationActions {
   PointAnnotation? _movingAnnotation;
   Point? _movingAnnotationOriginalPoint;
 
+  // ---------------------------------------------------------------
+  //                      CONSTRUCTOR
+  // ---------------------------------------------------------------
   AnnotationActions({
     required this.localRepo,
     required this.annotationsManager,
@@ -36,7 +40,7 @@ class AnnotationActions {
   });
 
   // ---------------------------------------------------------------
-  //                  Connect Mode Methods
+  //                  CONNECT MODE METHODS
   // ---------------------------------------------------------------
   void startConnectMode(PointAnnotation firstAnnotation) {
     logger.i('AnnotationActions: startConnectMode with annotation: ${firstAnnotation.id}');
@@ -55,17 +59,20 @@ class AnnotationActions {
       logger.w('finishConnectMode called but we are not in connect mode or missing the first annotation.');
       return;
     }
-    logger.i('AnnotationActions: finishConnectMode connecting ${_firstConnectAnnotation!.id} with ${secondAnnotation.id}.');
+    logger.i(
+      'AnnotationActions: finishConnectMode connecting '
+      '${_firstConnectAnnotation!.id} with ${secondAnnotation.id}.'
+    );
 
-    // Do your linking/drawing lines in Hive or similar here
+    // Implement your linking/drawing lines logic here
+
     _isInConnectMode = false;
     _firstConnectAnnotation = null;
-
     logger.i('AnnotationActions: connect mode finished, returning to normal mode.');
   }
 
   // ---------------------------------------------------------------
-  //                  MOVE (Drag) Methods
+  //                  MOVE (DRAG) METHODS
   // ---------------------------------------------------------------
   void startMoveAnnotation(PointAnnotation annotation) {
     logger.i('AnnotationActions: startMoveAnnotation for ${annotation.id}');
@@ -83,8 +90,11 @@ class AnnotationActions {
     logger.i('AnnotationActions: cancelMoveAnnotation for ${_movingAnnotation!.id}');
 
     if (_movingAnnotationOriginalPoint != null) {
-      // revert the position visually
-      await annotationsManager.updateVisualPosition(_movingAnnotation!, _movingAnnotationOriginalPoint!);
+      // Revert the position visually
+      await annotationsManager.updateVisualPosition(
+        _movingAnnotation!,
+        _movingAnnotationOriginalPoint!,
+      );
     }
 
     _isInMoveMode = false;
@@ -98,6 +108,7 @@ class AnnotationActions {
       logger.w('finishMoveAnnotation called but not in move mode or annotation was null.');
       return;
     }
+
     final movedAnnotation = _movingAnnotation!;
     logger.i('AnnotationActions: finishMoveAnnotation for ${movedAnnotation.id} to $newLocation');
 
@@ -116,6 +127,7 @@ class AnnotationActions {
         logger.w('Moving annotation not found in Hive, cannot update.');
       } else {
         logger.i('finishMoveAnnotation: found in Hive => $ann');
+
         // Build updated version
         final updated = Annotation(
           id: ann.id,
@@ -129,6 +141,7 @@ class AnnotationActions {
           longitude: (newLocation.coordinates[0] as num).toDouble(),
           imagePath: ann.imagePath,
         );
+
         // Save to Hive
         await localRepo.updateAnnotation(updated);
         logger.i('finishMoveAnnotation: updated lat/lng in Hive => $updated');
@@ -176,7 +189,7 @@ class AnnotationActions {
   }
 
   // ---------------------------------------------------------------
-  //                  Edit Annotation Logic
+  //                  EDIT ANNOTATION LOGIC
   // ---------------------------------------------------------------
   Future<void> editAnnotation({
     required BuildContext context,
@@ -268,10 +281,7 @@ class AnnotationActions {
       );
 
       // Re-link
-      annotationIdLinker.registerAnnotationId(
-        newMapAnnotation.id,
-        updatedAnnotation.id,
-      );
+      annotationIdLinker.registerAnnotationId(newMapAnnotation.id, updatedAnnotation.id);
 
       logger.i('Annotation visually updated on map.');
     } else {
@@ -311,12 +321,10 @@ class AnnotationActions {
               const SizedBox(height: 8),
               ElevatedButton(
                 onPressed: () {
-                  onCancel();    // EarthMapPage callback
+                  onCancel();     // EarthMapPage callback
                   cancelConnectMode(); // domain logic
                 },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                ),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
                 child: const Text('Cancel'),
               ),
             ],
@@ -328,7 +336,7 @@ class AnnotationActions {
 }
 
 // ---------------------------------------------------------------------
-// Inline DraggableAnnotationOverlay code
+// Inline _DraggableAnnotationOverlay code
 // ---------------------------------------------------------------------
 class _DraggableAnnotationOverlay extends StatefulWidget {
   final Point initialPosition;
@@ -358,9 +366,10 @@ class _DraggableAnnotationOverlayState extends State<_DraggableAnnotationOverlay
   }
 
   Future<void> _initializePosition() async {
+    // Convert the annotation's map coordinate to screen coordinate
     final screenPoint = await widget.mapboxMap.pixelForCoordinate(widget.initialPosition);
     setState(() {
-      // Center the circle so its middle is at screenPoint
+      // Place the circle so its center is exactly at screenPoint
       _position = Offset(screenPoint.x, screenPoint.y);
     });
   }
@@ -378,31 +387,34 @@ class _DraggableAnnotationOverlayState extends State<_DraggableAnnotationOverlay
     return Stack(
       children: [
         Positioned(
-          // Shift by 15 so the circle's center is at _position
+          // Subtract half the circle's diameter so the circle is centered
           left: _position.dx - 15,
-          top: _position.dy - 15,
+          top: _position.dy - 30,
           child: GestureDetector(
             onPanUpdate: (details) async {
+              // 1) Update local offset
               final newPosition = Offset(
                 _position.dx + details.delta.dx,
                 _position.dy + details.delta.dy,
               );
 
+              // 2) Convert newPosition -> map coordinates
               final screenCoord = ScreenCoordinate(
                 x: newPosition.dx,
                 y: newPosition.dy,
               );
-
               final mapPoint = await widget.mapboxMap.coordinateForPixel(screenCoord);
               if (mapPoint != null) {
                 widget.onDragUpdate(mapPoint);
               }
 
+              // 3) Rebuild overlay at the new offset
               setState(() {
                 _position = newPosition;
               });
             },
             onPanEnd: (details) {
+              // Tell parent we finished dragging
               widget.onDragEnd();
             },
             child: _buildDragWidget(),
@@ -413,6 +425,7 @@ class _DraggableAnnotationOverlayState extends State<_DraggableAnnotationOverlay
   }
 
   Widget _buildDragWidget() {
+    // A 30×30 semi-transparent circle with a white border
     return Container(
       width: 30,
       height: 30,

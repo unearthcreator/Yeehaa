@@ -17,7 +17,7 @@ import 'package:map_mvp_project/models/world_config.dart';
 import 'package:map_mvp_project/src/earth_map/search/search_widget.dart';
 import 'package:map_mvp_project/src/earth_map/misc/test_utils.dart';
 import 'package:map_mvp_project/src/earth_map/annotations/annotation_menu.dart';
-import 'package:map_mvp_project/src/earth_map/annotations/annotation_actions.dart';
+import 'package:map_mvp_project/src/earth_map/annotations/annotation_menu_actions.dart';
 
 /// The main EarthMapPage, which sets up the map, annotations, and various UI widgets.
 class EarthMapPage extends StatefulWidget {
