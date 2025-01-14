@@ -11,13 +11,16 @@ import 'package:map_mvp_project/src/earth_map/annotations/map_annotations_manage
 import 'package:map_mvp_project/src/earth_map/gestures/map_gesture_handler.dart';
 import 'package:map_mvp_project/src/earth_map/utils/map_config.dart';
 import 'package:uuid/uuid.dart'; // for unique IDs
+
 import 'package:map_mvp_project/src/earth_map/timeline/timeline.dart';
 import 'package:map_mvp_project/src/earth_map/annotations/annotation_id_linker.dart';
 import 'package:map_mvp_project/models/world_config.dart';
 import 'package:map_mvp_project/src/earth_map/search/search_widget.dart';
 import 'package:map_mvp_project/src/earth_map/misc/test_utils.dart';
-import 'package:map_mvp_project/src/earth_map/annotations/annotation_menu.dart';
-import 'package:map_mvp_project/src/earth_map/annotations/annotation_menu_actions.dart';
+
+// Our new code for annotation actions & the annotation menu:
+import 'package:map_mvp_project/src/earth_map/annotations/annotations_menu/annotation_menu_actions.dart';
+import 'package:map_mvp_project/src/earth_map/annotations/annotations_menu/annotation_menu_buttons.dart';
 
 /// The main EarthMapPage, which sets up the map, annotations, and various UI widgets.
 class EarthMapPage extends StatefulWidget {
@@ -47,8 +50,10 @@ class EarthMapPageState extends State<EarthMapPage> {
   Offset _annotationMenuOffset = Offset.zero;
 
   // ---------------------- Dragging & Connect Mode ----------------------
-  bool _isDragging = false; // Reused for "move" mode
-  bool _isConnectMode = false;  
+  bool _isDragging = false; // "Move" mode toggle
+  bool _isConnectMode = false;
+
+  // If we’re in dragging mode, button says "Lock," else "Move."
   String get _annotationButtonText => _isDragging ? 'Lock' : 'Move';
 
   // ---------------------- UUID Generator ----------------------
@@ -79,26 +84,27 @@ class EarthMapPageState extends State<EarthMapPage> {
       logger.i('Starting map initialization');
       _mapboxMap = mapboxMap;
 
-      // 1) Create the underlying Mapbox annotation manager
+      // Create the underlying Mapbox annotation manager
       final annotationManager = await mapboxMap.annotations
           .createPointAnnotationManager()
           .onError((error, stackTrace) {
-        logger.e('Failed to create annotation manager', error: error, stackTrace: stackTrace);
+        logger.e('Failed to create annotation manager',
+            error: error, stackTrace: stackTrace);
         throw Exception('Failed to initialize map annotations');
       });
 
-      // 2) Local repo + annotation linker
+      // Local repo + annotation linker
       _localRepo = LocalAnnotationsRepository();
       final annotationIdLinker = AnnotationIdLinker();
 
-      // 3) Create our MapAnnotationsManager
+      // MapAnnotationsManager
       _annotationsManager = MapAnnotationsManager(
         annotationManager,
         annotationIdLinker: annotationIdLinker,
         localAnnotationsRepository: _localRepo,
       );
 
-      // 4) Set up the gesture handler
+      // MapGestureHandler
       _gestureHandler = MapGestureHandler(
         mapboxMap: _mapboxMap,
         annotationsManager: _annotationsManager,
@@ -116,7 +122,7 @@ class EarthMapPageState extends State<EarthMapPage> {
         },
       );
 
-      // 5) Domain logic for editing, connecting, etc.
+      // Domain logic: editing, connecting, moving, etc.
       _annotationActions = AnnotationActions(
         localRepo: _localRepo,
         annotationsManager: _annotationsManager,
@@ -125,7 +131,6 @@ class EarthMapPageState extends State<EarthMapPage> {
 
       logger.i('Map initialization completed successfully');
 
-      // 6) Once the map is ready, load Hive annotations
       if (mounted) {
         setState(() => _isMapReady = true);
         await _annotationsManager.loadAnnotationsFromHive();
@@ -160,7 +165,7 @@ class EarthMapPageState extends State<EarthMapPage> {
   }
 
   void _handleDragEnd() {
-    // Drag ended
+    // Called when user lifts finger from a drag
   }
 
   void _handleAnnotationRemoved() {
@@ -207,16 +212,21 @@ class EarthMapPageState extends State<EarthMapPage> {
   // ---------------------------------------------------------------------
   void _handleMoveOrLockButton() {
     setState(() {
+      // If we aren't dragging => user clicks "Move"
       if (!_isDragging) {
         if (_annotationMenuAnnotation != null) {
           _annotationActions.startMoveAnnotation(_annotationMenuAnnotation!);
         }
         _isDragging = true;
       } else {
-        _annotationActions.cancelMoveAnnotation();
+        // If we are dragging => user clicks "Lock"
+        // We can finalize or just cancel.
+        if (_annotationMenuAnnotation != null) {
+          // Example: finalize the location in Hive
+          _annotationActions.finishMoveAnnotation(_annotationMenuAnnotation!.geometry);
+        }
         _isDragging = false;
       }
-      _showAnnotationMenu = false;
     });
   }
 
@@ -332,7 +342,7 @@ class EarthMapPageState extends State<EarthMapPage> {
               show: _showAnnotationMenu,
               annotation: _annotationMenuAnnotation,
               offset: _annotationMenuOffset,
-              isDragging: _isDragging,
+              isDragging: _isDragging, 
               annotationButtonText: _annotationButtonText,
               onMoveOrLock: _handleMoveOrLockButton,
               onEdit: _handleEditButton,
